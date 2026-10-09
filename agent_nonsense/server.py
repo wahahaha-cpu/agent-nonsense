@@ -9,6 +9,7 @@ import uuid
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.parse import parse_qs, urlparse
 
 from .longform import compile_preset
@@ -1187,6 +1188,14 @@ class MockAgentServer(BaseHTTPRequestHandler):
         super().log_message(fmt, *args)
 
 
+class AgentHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer performs reverse DNS here. This local API does not use a
+        # canonical hostname; slow/offline resolvers must not delay startup.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def create_server(
     host=DEFAULT_HOST,
     port=DEFAULT_PORT,
@@ -1203,7 +1212,7 @@ def create_server(
     max_write_bytes=200_000,
     quiet=False,
 ):
-    server = ThreadingHTTPServer((host, port), MockAgentServer)
+    server = AgentHTTPServer((host, port), MockAgentServer)
     server.sandbox = Path(sandbox or (Path.cwd() / ".agent-nonsense-sandbox")).resolve()
     server.sandbox.mkdir(parents=True, exist_ok=True)
     server.delay = max(0, delay)
@@ -1277,13 +1286,13 @@ def main():
         quiet=args.quiet,
     )
 
-    print(f"agent-nonsense listening on http://{args.host}:{args.port}")
-    print(f"sandbox: {server.sandbox.resolve()}")
+    print(f"agent-nonsense listening on http://{args.host}:{args.port}", flush=True)
+    print(f"sandbox: {server.sandbox.resolve()}", flush=True)
     stream_mode = "continuous compatible streams" if server.continuous_stream else "finite compatible streams"
     tool_mode = "sandbox tools enabled" if server.simulate_tools else "sandbox tools opt-in"
     if server.native_tools:
         tool_mode += "; native tool loop"
-    print(f"mode: local zero-token simulator; upstream calls: 0; {stream_mode}; {tool_mode}; presets: {len(server.presets)}")
+    print(f"mode: local zero-token simulator; upstream calls: 0; {stream_mode}; {tool_mode}; presets: {len(server.presets)}", flush=True)
     server.serve_forever()
 
 

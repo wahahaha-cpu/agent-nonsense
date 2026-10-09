@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+import sys
+from unittest.mock import patch
 from pathlib import Path
 
 from agent_nonsense.desktop.models import (
@@ -9,6 +11,22 @@ from agent_nonsense.desktop.models import (
 
 
 class DesktopModelsTestCase(unittest.TestCase):
+    def test_source_and_frozen_server_commands_preserve_paths_and_arguments(self):
+        with tempfile.TemporaryDirectory(prefix="Doupi install ") as directory:
+            config = ServerConfig.load(Path(directory) / "settings.json", directory)
+            executable, arguments = config.launch_command()
+            self.assertEqual(executable, sys.executable)
+            self.assertEqual(arguments[:3], ["-u", "-m", "agent_nonsense"])
+            for target in ("win32", "darwin", "linux"):
+                with self.subTest(platform=target):
+                    frozen = Path(directory) / ("Doupi.exe" if target == "win32" else "Doupi")
+                    with patch.object(sys, "frozen", True, create=True), patch.object(sys, "executable", str(frozen)), patch.object(sys, "platform", target):
+                        executable, arguments = config.launch_command()
+                    self.assertEqual(executable, str(frozen.with_name("doupi-server.exe") if target == "win32" else frozen))
+                    self.assertEqual(arguments[0], "--doupi-server")
+                    self.assertNotIn("-m", arguments)
+                    self.assertEqual(arguments[arguments.index("--sandbox") + 1], str(Path(directory) / "sandbox"))
+
     def test_configuration_round_trip_and_argument_mapping(self):
         with tempfile.TemporaryDirectory(prefix="豆皮 ") as directory:
             path = Path(directory) / "settings.json"
@@ -53,6 +71,13 @@ class DesktopModelsTestCase(unittest.TestCase):
 
     def test_sse_flushes_unterminated_final_event(self):
         self.assertEqual(SSEDecoder().feed(b"data: last", final=True), ["last"])
+
+    def test_sse_large_coalesced_batch_preserves_order_and_partial_tail(self):
+        events = [json.dumps({"index": i, "delta": "豆皮" * 128 + "🌱"}, ensure_ascii=False) for i in range(12000)]
+        parser = SSEDecoder()
+        wire = ("".join("data: " + event + "\r\n\r\n" for event in events) + "data: 最后").encode()
+        self.assertEqual(parser.feed(wire), events)
+        self.assertEqual(parser.feed("一个事件\n\n".encode(), final=True), ["最后一个事件"])
 
     def test_request_and_text_mapping_for_all_protocols(self):
         for protocol, path in (("Responses", "/v1/responses"), ("Messages", "/v1/messages"),

@@ -1,6 +1,6 @@
 # 桌面 GUI 验证记录
 
-验证日期：2026-10-09。开发分支：`codex/doupi-desktop-gui`。
+验证日期：2026-10-09。开发分支：`codex/desktop-installers`。
 
 本机环境：macOS、Python 3.12.14、PySide6 Essentials / Qt 6.11.2。
 
@@ -8,7 +8,7 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `python -m unittest discover -s tests -v` | 36 项全部通过，包含原有 13 项与新增 23 项 |
+| `python -m unittest discover -s tests -v` | 44 项全部通过，包含原有 13 项与新增 31 项 |
 | `python -m compileall -q agent_nonsense` | 通过 |
 | `git diff --check` | 通过 |
 | wheel 构建 | 通过 |
@@ -16,6 +16,8 @@
 | 独立环境安装 wheel 的 `gui` extra | 从源码目录之外启动真实服务、随机轮播、更新当前剧本标题、保持同一 SSE 连接、关闭后清理子进程，全部通过 |
 | 六个页面实际 Qt 渲染截图检查 | 已检查中文、卡片布局、按钮、编辑区、表格、日志 |
 | 默认 1260×850 和最小 1000×700 窗口 | 已检查；较小窗口的控制台和设置页可滚动 |
+| macOS arm64 PyInstaller 自包含应用 | 原版资源、包内服务、三种协议、随机轮播、连接取消和退出清理全部通过 |
+| macOS arm64 DMG 安装验证 | 镜像校验、挂载、复制到带空格的临时安装目录、签名完整性及安装后自检通过 |
 
 新增集成测试通过真实 QProcess 和本地 HTTP 验证：
 
@@ -32,11 +34,14 @@
 - 随机连续流在完整剧本结束后切换，三种协议均按 A → B → A 播放；固定随机候选选择器验证切换不依赖运气。
 - 随机重发避免紧邻重复；有限响应及结尾保持同一剧本，指定剧本与单份剧本继续循环。
 - 真实 Qt/HTTP 预览在三种协议下显示实际剧本；连续轮播更新标题、保持随机模式和同一网络连接。
+- 大批量 SSE 数据保持事件顺序和跨包尾部；零延迟持续输出期间，真实停止按钮及时取消连接。
 
 新增纯 Python 测试验证配置参数映射、无效配置保护、UTF-8 多字节字符跨数据包解析、SSE 多行及结尾处理、协议字段映射和预设约束。
 
+安装包新增测试验证源码/冻结程序在三种系统上的启动命令、Windows 包内服务入口、独立服务分发及自检退出码。服务启动测试还验证无需反向 DNS 查询，以及普通 Python 子进程立即输出就绪消息。跨平台安装包构建流程见 [安装包指南](INSTALLERS.md)，远程实际结果和下载以对应 PR、Actions 与 Releases 为准。
+
 ## 验证范围
 
-本机运行验证覆盖 macOS。Windows / Linux 的 GitHub Actions 配置已添加，尚未在远程执行，不能视为已验证。原生界面的鼠标点击自动化工具发生超时，界面和交互通过真实 Qt 窗口渲染与 Qt 集成测试完成验证。
+本机运行验证覆盖 macOS。Windows / Linux 已在原生 GitHub Actions runner 完成安装、包内服务、HTTP/SSE、自检和卸载检查；最终提交的四平台结果以 [PR #1](https://github.com/wahahaha-cpu/agent-nonsense/pull/1) 的 Actions 检查为准。原生界面的鼠标点击自动化工具发生超时，界面和交互通过真实 Qt 窗口渲染与 Qt 集成测试完成验证。
 
 本地验证完成后提交到 GitHub；远程 CI 状态以仓库 Actions 页面为准。

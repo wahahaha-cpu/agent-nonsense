@@ -2,6 +2,7 @@
 import codecs
 import json
 import math
+import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -79,6 +80,15 @@ class ServerConfig:
                 args.append("--" + flag)
         return args
 
+    def launch_command(self):
+        arguments = self.arguments()
+        if getattr(sys, "frozen", False):
+            executable = Path(sys.executable)
+            if sys.platform == "win32":
+                executable = executable.with_name("doupi-server.exe")
+            return str(executable), ["--doupi-server", *arguments[3:]]
+        return sys.executable, arguments
+
     def save(self, path):
         self.validate()
         atomic_write(path, json.dumps(asdict(self), ensure_ascii=False, indent=2) + "\n")
@@ -139,8 +149,11 @@ class SSEDecoder:
     def feed(self, chunk, final=False):
         self.buffer += self.decoder.decode(chunk, final=final)
         result = []
-        while "\n" in self.buffer:
-            line, self.buffer = self.buffer.split("\n", 1)
+        # Split each received batch once. Repeatedly copying the remaining
+        # buffer becomes quadratic when fast streams deliver large batches.
+        lines = self.buffer.split("\n")
+        self.buffer = lines.pop()
+        for line in lines:
             line = line.removesuffix("\r")
             if not line:
                 if self.data:

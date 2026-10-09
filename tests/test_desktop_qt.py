@@ -8,8 +8,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
-    from PySide6.QtCore import QProcess
-    from PySide6.QtTest import QTest
+    from PySide6.QtCore import QProcess, QTimer
     from PySide6.QtWidgets import QApplication
     from agent_nonsense.desktop.window import MainWindow
     from agent_nonsense.desktop.theme import STYLE
@@ -53,8 +52,19 @@ class DesktopQtTestCase(unittest.TestCase):
             self.app.processEvents()
             if predicate():
                 return
-            QTest.qWait(20)
-        self.fail("Timed out; logs:\n" + self.window.logs.toPlainText())
+            # Yield between bounded event drains so a continuous SSE stream
+            # cannot keep a nested Qt test event loop busy past the deadline.
+            time.sleep(0.02)
+        backend = self.window.backend
+        diagnostics = f"state={backend.state}, process={backend.process.state()}, pid={backend.process.processId()}, ready={backend._ready}"
+        if backend.config and backend.process.state() == QProcess.ProcessState.Running:
+            import urllib.request
+            try:
+                with urllib.request.urlopen(backend.config.base_url + "/health", timeout=0.5) as response:
+                    diagnostics += ", HTTP health=" + str(response.status)
+            except Exception as exc:
+                diagnostics += ", HTTP health=" + str(exc)
+        self.fail("Timed out; " + diagnostics + "\nChild output:\n" + backend._last_output + "\nLogs:\n" + self.window.logs.toPlainText())
 
     def start(self):
         self.window.toggle_server()
@@ -154,6 +164,20 @@ class DesktopQtTestCase(unittest.TestCase):
         self.window.stop_job()
         self.wait_for(lambda: self.window.jobs[0]["status"] == "stopped")
         self.assertFalse(self.window.stop_job_button.isEnabled())
+
+    def test_zero_delay_stream_keeps_stop_button_responsive(self):
+        self.window.delay.setValue(0)
+        self.window.tools.setChecked(False)
+        self.window.preview_continuous.setChecked(True)
+        self.start()
+        self.window.start_preview()
+        self.wait_for(lambda: self.window.stream_chars > 500)
+        started = time.monotonic()
+        QTimer.singleShot(50, self.window.preview_stop.click)
+        self.wait_for(lambda: self.window.backend.stream is None, timeout=4)
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(self.window.preview_status.text(), "已停止输出")
+        self.assertLessEqual(len(self.window.stream_buffer), 60000)
 
     def test_selecting_dialogue_updates_question_and_clears_previous_output(self):
         import json
